@@ -1,0 +1,26 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  labels:
+    app.bancolombia.com.co/application-code: sq
+    app.bancolombia.com.co/cost-center: cost
+    app.bancolombia.com.co/env: pdn
+    app.bancolombia.com.co/project: "cpe-contenerizacion"
+  name: skillfullers-sqs-hpa #Nombre del recurso ScaledObject
+  namespace: skillfullers #Ns donde se va a desplegar el recurso
+spec:
+  maxReplicaCount: 10 #Cantidad máx a escalar pods
+  minReplicaCount: 0 #Cantidad min de pods existentes
+  pollingInterval: 30 #Frecuencia para revisar los msj en las colas para determinar si debe escalar o desescalar
+  cooldownPeriod: 10  # Este es el tiempo en segundos que KEDA esperará antes de desescalar los pods.
+
+  scaleTargetRef:
+    name: skillfullers-sqs-dp #Aqui va el nombre de su deployment
+  triggers:
+  - metadata:
+      awsRegion: us-east-1 #Region de aws
+    # activationQueueLength: "30"
+      identityOwner: operator #Autenticacion
+      queueLength: "5" #Cantidad de mensajes que un pod va a soportar
+      queueURL: skillfullers #Nombre de su cola
+    type: aws-sqs-queue

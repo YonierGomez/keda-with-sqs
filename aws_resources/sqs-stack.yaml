@@ -1,0 +1,22 @@
+Resources:
+  MyQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: skillfullers
+      DelaySeconds: 0
+      MaximumMessageSize: 262144
+      MessageRetentionPeriod: 345600
+      ReceiveMessageWaitTimeSeconds: 0
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: { "Fn::GetAtt" : ["DLQueue", "Arn"] }
+        maxReceiveCount: 5
+  DLQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: skillfullers-dlq
+      DelaySeconds: 0
+      MaximumMessageSize: 262144
+      MessageRetentionPeriod: 345600
+      ReceiveMessageWaitTimeSeconds: 0
+      VisibilityTimeout: 30

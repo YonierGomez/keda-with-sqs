@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: skillfullers-app-sqs
+  name: skillfullers-sqs-dp
+  namespace: skillfullers
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: skillfullers-app-sqs
+  template:
+    metadata:
+      labels:
+        app: skillfullers-app-sqs
+    spec:
+      serviceAccount: skillfullers-sa  # Asignación del Service Account aquí
+      containers:
+      - image: public.ecr.aws/repo-skillfullers/eks:app-sqs-skillfullers
+        imagePullPolicy: Always
+        name: skillfullers-sqs
+        resources:
+          limits:
+            cpu: 100m
+            memory: 200Mi
+          requests:
+            cpu: 30m
+            memory: 90Mi
