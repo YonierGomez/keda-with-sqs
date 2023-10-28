@@ -57,7 +57,7 @@ services:
 
 ```bash
 docker container run \
-   --name report_news -e QUEUE_URL=URL-COLA-SQS
+   --name sqs_consumer -e QUEUE_URL=URL-COLA-SQS
    -d neytor/sqs-consumer
 ```
 
@@ -87,7 +87,7 @@ Puedes utilizarla para cualquier raspberry pi
 
 ```bash
 docker container run \
-  --name report_news -e QUEUE_URL=URL-COLA-SQS
+  --name sqs_consumer -e QUEUE_URL=URL-COLA-SQS
   -d neytor/sqs-consumer:arm
 ```
 
