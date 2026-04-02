@@ -1,40 +1,122 @@
-name: Docker Image CI SQS CONSUMER
+name: Docker Multi-Arch CI - SQS Consumer
 
 on:
   push:
     branches: [ "master", "main" ]
   pull_request:
     branches: [ "master", "main" ]
-  workflow_dispatch: # Agrega esta entrada para habilitar la ejecución manual
-    branches: [ "master", "main" ] # Opcional: restringe las ramas donde se puede ejecutar
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no code changes'
+        required: false
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
+  # ── Phase 1: build per-arch on native runners (no QEMU) ──────────────────────
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
 
-  build_push_image:
+    steps:
+      - uses: actions/checkout@v6.0.2
+        name: Download code from repo
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Docker Login
+        uses: docker/login-action@v4.0.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.USER_HUB }}
+          password: ${{ secrets.PASS_HUB }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7.0.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          outputs: type=image,name=neytor/sqs-consumer,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: digest-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Phase 2: merge digests into multi-arch manifest ──────────────────────────
+  build-and-push:
+    needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6.0.2
-      name: Download codigo from repo
-      
-    - name: Docker Login
-      uses: docker/login-action@v4.0.0
-      with:
-        registry: docker.io
-        username: ${{ secrets.USER_HUB }}
-        password: ${{ secrets.PASS_HUB }}
-        
-    
-    - name: Build and push the Docker image latest
-      run: |
-        docker build . --file Dockerfile --tag neytor/sqs-consumer && 
-        docker image ls && docker push neytor/sqs-consumer
+      - name: Download digests
+        uses: actions/download-artifact@v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
 
-    - name: Build and push the Docker image with tag
-      run: |
-        docker build . --file Dockerfile --tag neytor/sqs-consumer:v1 && \
-        docker image ls && docker push neytor/sqs-consumer:v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Docker Login
+        uses: docker/login-action@v4.0.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.USER_HUB }}
+          password: ${{ secrets.PASS_HUB }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t neytor/sqs-consumer:latest \
+            -t neytor/sqs-consumer:v1 \
+            $(printf 'neytor/sqs-consumer@sha256:%s ' $(ls /tmp/digests))
+
+  # ── PR: build only (no push) for validation ──────────────────────────────────
+  build-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        name: Download code from repo
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v7.0.0
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: neytor/sqs-consumer:pr-test
       
     
 
