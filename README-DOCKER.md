@@ -38,7 +38,6 @@ You must pass the `-e QUEUE_URL=<YOUR_SQS_QUEUE_URL>` environment variable.
 
 ```yaml
 ---
-version: '3'
 services:
   sqs_consumer:
     image: yoniergomez/keda-with-sqs

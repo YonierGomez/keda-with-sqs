@@ -1,5 +1,5 @@
 # Usar una imagen base de Node.js
-FROM node:21-alpine
+FROM node:alpine
 
 #Pasar url de cola
 ENV QUEUE_URL "https://sqs.us-east-1.amazonaws.com/715211652634/skillfullers"
