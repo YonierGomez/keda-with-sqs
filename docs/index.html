@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KEDA × SQS — Event-Driven Autoscaling on EKS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { overflow-x: hidden; max-width: 100%; }
+
+    :root {
+      --green:   #00e676;
+      --green-dim: #00e67633;
+      --green-glow: 0 0 20px #00e676aa, 0 0 60px #00e67644;
+      --cyan:    #00b4d8;
+      --bg:      #05080f;
+      --bg2:     #080d18;
+      --bg3:     #0c1220;
+      --border:  #1a2540;
+      --text:    #c8d8f0;
+      --muted:   #4a6080;
+      --red:     #ff4d6d;
+      --yellow:  #ffd166;
+      --font-display: 'Orbitron', monospace;
+      --font-mono:    'JetBrains Mono', monospace;
+      --font-body:    'IBM Plex Sans', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-weight: 300;
+      overflow-x: hidden;
+      max-width: 100%;
+    }
+
+    /* ─── Noise texture overlay ─── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      opacity: 0.6;
+    }
+
+    /* ─── SUBTLE RADIAL GLOW at top ─── */
+    body::after {
+      content: '';
+      position: fixed; top: -200px; left: 50%; transform: translateX(-50%);
+      width: min(800px, 100vw); height: 400px;
+      background: radial-gradient(ellipse, #00e67608 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─── NAV ─── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 48px;
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      background: #05080fcc;
+      backdrop-filter: blur(12px);
+    }
+    .nav-logo {
+      font-family: var(--font-display);
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      color: var(--green);
+    }
+    .nav-logo span { color: var(--muted); }
+    .nav-links { display: flex; gap: 32px; }
+    .nav-links a {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--green); }
+    .nav-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 4px 12px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      letter-spacing: 0.1em;
+    }
+
+    /* ─── SECTIONS ─── */
+    section { position: relative; z-index: 2; }
+
+    /* ─── HERO ─── */
+    #hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      gap: 0;
+    }
+    .hero-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      color: var(--green);
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      opacity: 0;
+      animation: fadeUp 0.6s 0.2s forwards;
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(42px, 8vw, 96px);
+      font-weight: 900;
+      line-height: 0.95;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      opacity: 0;
+      animation: fadeUp 0.7s 0.35s forwards;
+    }
+    .hero-title .keda { color: #fff; }
+    .hero-title .x {
+      color: var(--muted);
+      font-size: 0.5em;
+      vertical-align: middle;
+      margin: 0 8px;
+    }
+    .hero-title .sqs { color: var(--green); text-shadow: var(--green-glow); }
+    .hero-sub {
+      font-family: var(--font-mono);
+      font-size: clamp(12px, 2vw, 15px);
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      margin-top: 20px;
+      margin-bottom: 40px;
+      max-width: 540px;
+      line-height: 1.7;
+      opacity: 0;
+      animation: fadeUp 0.7s 0.5s forwards;
+    }
+    .hero-sub em { color: var(--cyan); font-style: normal; }
+    .hero-cta {
+      display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+      margin-bottom: 72px;
+      opacity: 0;
+      animation: fadeUp 0.7s 0.65s forwards;
+    }
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 14px 28px;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--green);
+      color: #05080f;
+      font-weight: 600;
+    }
+    .btn-primary:hover {
+      background: #fff;
+      box-shadow: var(--green-glow);
+    }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--green); color: var(--green); }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── LIVE VISUALIZER ─── */
+    .visualizer {
+      width: 100%;
+      max-width: 900px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      position: relative;
+      opacity: 0;
+      animation: fadeUp 0.8s 0.8s forwards;
+    }
+    .viz-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-red  { background: var(--red); }
+    .dot-yellow { background: var(--yellow); }
+    .dot-green { background: var(--green); }
+    .viz-title { margin-left: 8px; }
+    .viz-status { margin-left: auto; color: var(--green); }
+    .viz-status::before { content: '● '; }
+
+    .viz-body {
+      display: grid; grid-template-columns: 1fr auto 1fr;
+      align-items: center; gap: 0;
+      padding: 32px 24px;
+      min-width: 0;
+    }
+
+    /* Queue panel */
+    .queue-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .panel-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .queue-bar-wrap {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      height: 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .queue-bar-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: linear-gradient(90deg, var(--green-dim), var(--green));
+      transition: width 0.5s ease;
+    }
+    .queue-bar-label {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; padding: 0 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      z-index: 1;
+    }
+    .queue-count {
+      font-family: var(--font-mono);
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--green);
+      text-shadow: var(--green-glow);
+      line-height: 1;
+    }
+    .queue-unit {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      margin-top: 4px;
+    }
+    .messages-stream {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 120px; overflow: hidden;
+    }
+    .msg-item {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+      padding: 3px 8px;
+      border-left: 2px solid var(--border);
+      animation: msgIn 0.3s ease;
+    }
+    .msg-item.new { color: var(--green); border-left-color: var(--green); }
+    @keyframes msgIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+
+    /* Arrow */
+    .viz-arrow {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 0 20px;
+    }
+    .arrow-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    .arrow-line {
+      width: 80px; height: 2px;
+      background: linear-gradient(90deg, var(--border), var(--green), var(--border));
+      position: relative;
+    }
+    .arrow-line::after {
+      content: '';
+      position: absolute; right: -1px; top: -4px;
+      border-left: 8px solid var(--green);
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+    .arrow-pulse {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; transform: scale(0.8); }
+      50%       { opacity: 1;   transform: scale(1.2); box-shadow: 0 0 12px var(--green); }
+    }
+
+    /* Pods panel */
+    .pods-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .pods-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+      min-height: 80px;
+    }
+    .pod {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 8px;
+      color: var(--muted);
+      transition: all 0.4s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .pod.active {
+      border-color: var(--green);
+      background: var(--green-dim);
+      color: var(--green);
+      box-shadow: 0 0 10px var(--green-dim);
+    }
+    .pod.spawning {
+      animation: podSpawn 0.4s ease forwards;
+    }
+    .pod.terminating {
+      animation: podKill 0.4s ease forwards;
+    }
+    @keyframes podSpawn {
+      from { transform: scale(0); opacity: 0; }
+      to   { transform: scale(1); opacity: 1; }
+    }
+    @keyframes podKill {
+      from { transform: scale(1); opacity: 1; }
+      to   { transform: scale(0); opacity: 0; }
+    }
+    .pod-count-display {
+      font-family: var(--font-mono);
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--cyan);
+      line-height: 1;
+    }
+    .pod-count-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      margin-top: 4px;
+    }
+    .keda-label {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+    .keda-label::before {
+      content: '';
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      flex-shrink: 0;
+    }
+
+    .viz-footer {
+      border-top: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex; gap: 24px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+    .viz-stat { display: flex; gap: 6px; }
+    .viz-stat span { color: var(--text); }
+
+    /* ─── STATS BAND ─── */
+    .stats-band {
+      display: flex; justify-content: center;
+      gap: 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-item {
+      flex: 1;
+      max-width: 220px;
+      padding: 40px 24px;
+      text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 40px;
+      font-weight: 700;
+      color: var(--green);
+      line-height: 1;
+    }
+    .stat-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-top: 8px;
+    }
+
+    /* ─── HOW IT WORKS ─── */
+    #how {
+      padding: 120px 48px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      color: var(--green);
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 48px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+      margin-bottom: 64px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+    }
+    .step {
+      background: var(--bg);
+      padding: 40px 32px;
+      position: relative;
+      transition: background 0.3s;
+    }
+    .step:hover { background: var(--bg2); }
+    .step-num {
+      font-family: var(--font-display);
+      font-size: 72px;
+      font-weight: 900;
+      color: var(--border);
+      line-height: 1;
+      margin-bottom: 16px;
+      transition: color 0.3s;
+    }
+    .step:hover .step-num { color: var(--green-dim); }
+    .step-title {
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .step-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .step-desc code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--cyan);
+      background: var(--bg3);
+      padding: 1px 5px;
+    }
+    .step-tag {
+      position: absolute; top: 16px; right: 16px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+
+    /* ─── TECH STACK ─── */
+    #stack {
+      padding: 80px 48px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+    }
+    .tech-card {
+      background: var(--bg);
+      padding: 28px 24px;
+      display: flex; flex-direction: column; gap: 8px;
+      transition: background 0.2s;
+      cursor: default;
+    }
+    .tech-card:hover { background: var(--bg2); }
+    .tech-icon {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      color: var(--green);
+    }
+    .tech-name {
+      font-family: var(--font-display);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: #fff;
+    }
+    .tech-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+    /* ─── QUICK START ─── */
+    #quickstart {
+      padding: 80px 48px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .terminal {
+      background: #02040a;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      max-width: 100%;
+    }
+    .terminal-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+    .terminal-title {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      margin-left: 8px;
+    }
+    .terminal-body {
+      padding: 24px 28px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .t-comment { color: var(--muted); }
+    .t-prompt { color: var(--green); }
+    .t-cmd { color: var(--text); }
+    .t-string { color: var(--yellow); }
+    .t-flag { color: var(--cyan); }
+    .t-output { color: var(--muted); padding-left: 20px; font-size: 11px; }
+
+    /* ─── DOCKER SECTION ─── */
+    #docker {
+      padding: 80px 48px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .docker-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+    }
+    .docker-card {
+      background: var(--bg);
+      padding: 36px 32px;
+    }
+    .docker-title {
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #fff;
+      margin-bottom: 16px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .docker-title::before {
+      content: '';
+      width: 6px; height: 6px;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+    .code-block {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text);
+      line-height: 1.8;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .code-block .k { color: var(--cyan); }
+    .code-block .v { color: var(--yellow); }
+    .code-block .c { color: var(--muted); }
+
+    /* ─── FOOTER ─── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 48px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 24px;
+      position: relative; z-index: 2;
+    }
+    .footer-logo {
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 0.1em;
+    }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-decoration: none;
+      letter-spacing: 0.1em;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--green); }
+    .footer-copy {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    /* ─── DIVIDER ─── */
+    .divider {
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      position: relative; z-index: 2;
+    }
+
+    /* ─── SCROLL REVEAL ─── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .reveal.visible { opacity: 1; transform: none; }
+
+    @media (max-width: 900px) {
+      .tech-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .nav-links { display: none; }
+      .nav-badge { font-size: 9px; padding: 4px 10px; }
+
+      #hero { padding: 100px 16px 60px; }
+
+      #how, #stack, #quickstart, #docker { padding: 60px 20px; }
+      footer { padding: 40px 20px; }
+
+      .steps { grid-template-columns: 1fr; }
+      .tech-grid { grid-template-columns: repeat(2, 1fr); }
+      .docker-grid { grid-template-columns: 1fr; }
+
+      .stats-band { flex-wrap: wrap; justify-content: flex-start; }
+      .stat-item {
+        flex: 0 0 50%;
+        max-width: 50%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .stat-item:nth-child(odd) { border-right: 1px solid var(--border); }
+
+      .visualizer { max-width: 100%; }
+      .viz-body { grid-template-columns: 1fr; gap: 20px; padding: 20px 16px; min-width: 0; }
+      .viz-arrow { flex-direction: row; align-items: center; gap: 8px; padding: 0; }
+      .arrow-line { width: 40px; }
+      .viz-footer { flex-wrap: wrap; gap: 10px 20px; }
+
+      .terminal-body { padding: 16px; font-size: 11px; }
+
+      .section-title { margin-bottom: 40px; }
+    }
+
+    @media (max-width: 480px) {
+      .tech-grid { grid-template-columns: 1fr; }
+      .stat-item { flex: 0 0 100%; max-width: 100%; border-right: none; }
+      .stat-item:nth-child(odd) { border-right: none; }
+      .hero-title { font-size: clamp(38px, 14vw, 72px); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">KEDA<span>/</span>SQS</div>
+  <div class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#stack">Stack</a>
+    <a href="#quickstart">Quick start</a>
+    <a href="https://yonier.com" target="_blank">yonier.com ↗</a>
+  </div>
+  <a class="btn btn-primary nav-badge" href="https://github.com/YonierGomez/keda-with-sqs" target="_blank">
+    GitHub ↗
+  </a>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hero-label">Kubernetes Event-Driven Autoscaling</div>
+  <h1 class="hero-title">
+    <span class="keda">KEDA</span>
+    <span class="x">×</span>
+    <span class="sqs">SQS</span>
+  </h1>
+  <p class="hero-sub">
+    Scale pods to <em>zero</em> when the queue is empty.<br/>
+    Burst to <em>10 replicas</em> under load — automatically.
+  </p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#quickstart">Get started</a>
+    <a class="btn btn-secondary" href="https://hub.docker.com/r/yoniergomez/keda-with-sqs" target="_blank">Docker Hub ↗</a>
+  </div>
+
+  <!-- LIVE VISUALIZER -->
+  <div class="visualizer">
+    <div class="viz-header">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+      <span class="viz-title">keda-with-sqs — live simulation</span>
+      <span class="viz-status" id="viz-status-text">RUNNING</span>
+    </div>
+    <div class="viz-body">
+      <!-- Queue -->
+      <div class="queue-panel">
+        <div class="panel-label">SQS Queue</div>
+        <div class="queue-bar-wrap">
+          <div class="queue-bar-fill" id="queue-bar" style="width:0%"></div>
+          <div class="queue-bar-label" id="queue-bar-label">0 / 50 messages</div>
+        </div>
+        <div style="display:flex; gap:24px; align-items:flex-end; margin:8px 0">
+          <div>
+            <div class="queue-count" id="queue-num">0</div>
+            <div class="queue-unit">messages</div>
+          </div>
+        </div>
+        <div class="messages-stream" id="msg-stream"></div>
+      </div>
+
+      <!-- Arrow -->
+      <div class="viz-arrow">
+        <div class="arrow-label">KEDA<br/>polling</div>
+        <div class="arrow-line"></div>
+        <div class="arrow-pulse"></div>
+      </div>
+
+      <!-- Pods -->
+      <div class="pods-panel">
+        <div class="panel-label">EKS Pods</div>
+        <div class="pods-grid" id="pods-grid"></div>
+        <div style="display:flex; gap:24px; align-items:flex-end; margin:8px 0">
+          <div>
+            <div class="pod-count-display" id="pod-num">0</div>
+            <div class="pod-count-label">active pods</div>
+          </div>
+          <div class="keda-label">KEDA scaling</div>
+        </div>
+      </div>
+    </div>
+    <div class="viz-footer">
+      <div class="viz-stat">QUEUE_LENGTH <span id="stat-ql">5</span></div>
+      <div class="viz-stat">POLLING_INTERVAL <span>30s</span></div>
+      <div class="viz-stat">MIN_REPLICAS <span>0</span></div>
+      <div class="viz-stat">MAX_REPLICAS <span>10</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-band reveal">
+  <div class="stat-item">
+    <div class="stat-value">0→10</div>
+    <div class="stat-label">Replica range</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-value">30s</div>
+    <div class="stat-label">Poll interval</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-value">5</div>
+    <div class="stat-label">Msgs per pod</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-value">DLQ</div>
+    <div class="stat-label">Dead letter queue</div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section id="how">
+  <div class="section-label reveal">Architecture</div>
+  <div class="section-title reveal">How it works</div>
+  <div class="steps reveal">
+    <div class="step">
+      <div class="step-tag">01</div>
+      <div class="step-num">01</div>
+      <div class="step-title">Messages arrive</div>
+      <p class="step-desc">Producers push messages to an <code>AWS SQS</code> queue. A Dead Letter Queue (<code>DLQ</code>) captures messages that fail after 5 retries.</p>
+    </div>
+    <div class="step">
+      <div class="step-tag">02</div>
+      <div class="step-num">02</div>
+      <div class="step-title">KEDA polls the queue</div>
+      <p class="step-desc">KEDA's <code>ScaledObject</code> checks the queue depth every <code>30s</code>. It calculates the desired replica count as <code>⌈messages / queueLength⌉</code>.</p>
+    </div>
+    <div class="step">
+      <div class="step-tag">03</div>
+      <div class="step-num">03</div>
+      <div class="step-title">EKS scales the Deployment</div>
+      <p class="step-desc">KEDA adjusts the HPA target. EKS spawns or terminates pods instantly — scaling <em>to zero</em> when the queue drains to save cost.</p>
+    </div>
+    <div class="step">
+      <div class="step-tag">04</div>
+      <div class="step-num">04</div>
+      <div class="step-title">IRSA authentication</div>
+      <p class="step-desc">The consumer pod uses a Kubernetes <code>ServiceAccount</code> linked to an IAM role via <code>IRSA</code> — no hardcoded credentials, ever.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- TECH STACK -->
+<section id="stack">
+  <div class="section-label reveal">Technology</div>
+  <div class="section-title reveal">Stack</div>
+  <div class="tech-grid reveal">
+    <div class="tech-card">
+      <div class="tech-icon">⚡</div>
+      <div class="tech-name">KEDA</div>
+      <div class="tech-desc">Kubernetes Event-Driven Autoscaler. Extends HPA for external event sources.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon">☁</div>
+      <div class="tech-name">AWS SQS</div>
+      <div class="tech-desc">Managed message queue. Scales from 0 to millions of messages/s.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon">⎈</div>
+      <div class="tech-name">Amazon EKS</div>
+      <div class="tech-desc">Managed Kubernetes cluster. Runs the consumer workload.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon">🔐</div>
+      <div class="tech-name">IRSA</div>
+      <div class="tech-desc">IAM Roles for Service Accounts. Fine-grained, keyless AWS auth for pods.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon">⬡</div>
+      <div class="tech-name">Node.js</div>
+      <div class="tech-desc">Lightweight SQS consumer — reads, processes, and deletes messages.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon">🐳</div>
+      <div class="tech-name">Docker Hub</div>
+      <div class="tech-desc">Multi-arch image (amd64 + arm64) auto-built via GitHub Actions.</div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- DOCKER -->
+<section id="docker">
+  <div class="section-label reveal">Container</div>
+  <div class="section-title reveal">Docker image</div>
+  <div class="docker-grid reveal">
+    <div class="docker-card">
+      <div class="docker-title">Pull image</div>
+      <div class="code-block">
+        <span class="k">docker</span> pull yoniergomez/keda-with-sqs<span class="c">:latest</span>
+      </div>
+      <br/>
+      <div class="docker-title">Run locally</div>
+      <div class="code-block">
+        <span class="k">docker</span> run \<br/>
+        &nbsp;&nbsp;<span class="c">-e</span> QUEUE_URL=<span class="v">"https://sqs..."</span> \<br/>
+        &nbsp;&nbsp;yoniergomez/keda-with-sqs
+      </div>
+    </div>
+    <div class="docker-card">
+      <div class="docker-title">Multi-arch CI/CD</div>
+      <div class="code-block">
+        <span class="c"># Builds on every push to main</span><br/>
+        <span class="c"># linux/amd64  native ubuntu-latest</span><br/>
+        <span class="c"># linux/arm64  native ubuntu-24.04-arm</span><br/><br/>
+        <span class="c"># Required GitHub secrets:</span><br/>
+        USER_HUB: <span class="v">Docker Hub username</span><br/>
+        PASS_HUB: <span class="v">Docker Hub token</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- QUICK START -->
+<section id="quickstart">
+  <div class="section-label reveal">Deploy</div>
+  <div class="section-title reveal">Quick start</div>
+  <div class="terminal reveal">
+    <div class="terminal-bar">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+      <span class="terminal-title">bash — setup &amp; deploy</span>
+    </div>
+    <div class="terminal-body">
+      <div><span class="t-comment"># 1. Provision AWS resources (idempotent Python script)</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">export CLUSTER_NAME=<span class="t-string">"my-eks-cluster"</span></span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">python3 aws_resources/setup_aws_resources.py</span></div>
+      <div class="t-output">✓ DLQ created: https://sqs.us-east-1.amazonaws.com/.../keda-with-sqs-dlq</div>
+      <div class="t-output">✓ Main queue created: https://sqs.us-east-1.amazonaws.com/.../keda-with-sqs</div>
+      <div class="t-output">✓ IAM policy created: arn:aws:iam::...policy/keda-with-sqs-policy</div>
+      <div class="t-output">✓ Service account created/updated</div>
+      <br/>
+      <div><span class="t-comment"># 2. Install KEDA on EKS</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">helm repo add kedacore https://kedacore.github.io/charts</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">helm install keda kedacore/keda <span class="t-flag">--namespace</span> keda <span class="t-flag">--create-namespace</span></span></div>
+      <br/>
+      <div><span class="t-comment"># 3. Deploy the consumer and ScaledObject</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">kubectl apply <span class="t-flag">-f</span> app-k8s/app-k8s.yaml</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">kubectl apply <span class="t-flag">-f</span> app-k8s/scale.yaml</span></div>
+      <br/>
+      <div><span class="t-comment"># 4. Watch pods scale in real time</span></div>
+      <div><span class="t-prompt">$ </span><span class="t-cmd">kubectl get pods <span class="t-flag">-w</span></span></div>
+      <div class="t-output">NAME                         READY   STATUS    REPLICAS</div>
+      <div class="t-output">keda-sqs-dp-7d4b9c-xk2f9     1/1     Running   1 → 4 → 8</div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<div class="divider"></div>
+<footer>
+  <div class="footer-logo">KEDA × SQS</div>
+  <div class="footer-links">
+    <a href="https://yonier.com" target="_blank">yonier.com</a>
+    <a href="https://github.com/YonierGomez/keda-with-sqs" target="_blank">GitHub</a>
+    <a href="https://hub.docker.com/r/yoniergomez/keda-with-sqs" target="_blank">Docker Hub</a>
+    <a href="https://keda.sh" target="_blank">KEDA Docs</a>
+  </div>
+  <div class="footer-copy">yoniergomez/keda-with-sqs</div>
+</footer>
+
+<script>
+  // ─── Scroll reveal ─────────────────────────────────────────────────────────
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); } });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ─── Pod visualizer simulation ─────────────────────────────────────────────
+  const QUEUE_LENGTH_TRIGGER = 5; // messages per pod
+  const MAX_PODS = 10;
+  const MAX_MSGS = 50;
+  const TOTAL_PODS = 10;
+
+  let queueSize = 0;
+  let activePods = 0;
+  let phase = 'fill'; // fill → drain → idle
+
+  const podsGrid = document.getElementById('pods-grid');
+  const queueBar = document.getElementById('queue-bar');
+  const queueBarLabel = document.getElementById('queue-bar-label');
+  const queueNum = document.getElementById('queue-num');
+  const podNum = document.getElementById('pod-num');
+  const msgStream = document.getElementById('msg-stream');
+  const statusText = document.getElementById('viz-status-text');
+
+  // Build pod cells
+  const podCells = [];
+  for (let i = 0; i < TOTAL_PODS; i++) {
+    const p = document.createElement('div');
+    p.className = 'pod';
+    p.textContent = `p${String(i+1).padStart(2,'0')}`;
+    podsGrid.appendChild(p);
+    podCells.push(p);
+  }
+
+  function updateQueueBar() {
+    const pct = (queueSize / MAX_MSGS) * 100;
+    queueBar.style.width = pct + '%';
+    queueBarLabel.textContent = `${queueSize} / ${MAX_MSGS} messages`;
+    queueNum.textContent = queueSize;
+  }
+
+  function desiredPods(msgs) {
+    if (msgs === 0) return 0;
+    return Math.min(MAX_PODS, Math.ceil(msgs / QUEUE_LENGTH_TRIGGER));
+  }
+
+  function reconcilePods(target) {
+    // Activate / deactivate pod cells
+    for (let i = 0; i < TOTAL_PODS; i++) {
+      const shouldBeActive = i < target;
+      const isActive = podCells[i].classList.contains('active');
+      if (shouldBeActive && !isActive) {
+        podCells[i].classList.add('active', 'spawning');
+        setTimeout(() => podCells[i].classList.remove('spawning'), 400);
+      } else if (!shouldBeActive && isActive) {
+        podCells[i].classList.add('terminating');
+        setTimeout(() => {
+          podCells[i].classList.remove('active', 'terminating');
+        }, 400);
+      }
+    }
+    activePods = target;
+    podNum.textContent = target;
+  }
+
+  let msgId = 1;
+  function addMsgToStream(text, isNew) {
+    const div = document.createElement('div');
+    div.className = 'msg-item' + (isNew ? ' new' : '');
+    div.textContent = text;
+    msgStream.insertBefore(div, msgStream.firstChild);
+    if (msgStream.children.length > 6) msgStream.lastChild.remove();
+  }
+
+  // Simulation loop
+  function tick() {
+    const target = desiredPods(queueSize);
+    reconcilePods(target);
+    updateQueueBar();
+
+    if (phase === 'fill') {
+      const add = Math.floor(Math.random() * 5) + 1;
+      const newCount = Math.min(queueSize + add, MAX_MSGS);
+      if (newCount !== queueSize) {
+        addMsgToStream(`msg-${String(msgId++).padStart(4,'0')} → enqueued`, true);
+      }
+      queueSize = newCount;
+      if (queueSize >= MAX_MSGS) { phase = 'drain'; statusText.textContent = 'PROCESSING'; }
+    } else if (phase === 'drain') {
+      const remove = Math.max(0, activePods) * 2;
+      queueSize = Math.max(0, queueSize - remove);
+      if (queueSize > 0) addMsgToStream(`msg processed — ${queueSize} remaining`, false);
+      if (queueSize === 0) { phase = 'idle'; statusText.textContent = 'IDLE'; }
+    } else {
+      // idle for a bit, then restart
+      statusText.textContent = 'SCALING DOWN';
+      setTimeout(() => { phase = 'fill'; statusText.textContent = 'RUNNING'; }, 4000);
+    }
+  }
+
+  setInterval(tick, 900);
+</script>
+</body>
+</html>
