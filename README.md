@@ -1,17 +1,17 @@
-# KEDA with SQS — Autoscaling de Pods en EKS
+# KEDA with SQS — Pod Autoscaling on EKS
 
-Laboratorio para escalar pods en Kubernetes (EKS) basado en mensajes en una cola **AWS SQS** usando **KEDA** (Kubernetes Event-Driven Autoscaling).
+Lab for scaling pods in Kubernetes (EKS) based on messages in an **AWS SQS** queue using **KEDA** (Kubernetes Event-Driven Autoscaling).
 
 ---
 
-## Arquitectura
+## Architecture
 
 ```
-┌──────────────┐     mensajes     ┌─────────────┐     métricas     ┌──────────────┐
-│  Productor   │ ──────────────►  │  AWS SQS    │ ──────────────►  │    KEDA      │
+┌──────────────┐     messages     ┌─────────────┐     metrics      ┌──────────────┐
+│  Producer    │ ──────────────►  │  AWS SQS    │ ──────────────►  │    KEDA      │
 │  (enviar.js) │                  │  Queue      │                  │  ScaledObject│
 └──────────────┘                  └─────────────┘                  └──────┬───────┘
-                                                                          │ escala
+                                                                          │ scales
                                                                    ┌──────▼───────┐
                                                                    │  Deployment  │
                                                                    │  (app.js)    │
@@ -20,33 +20,33 @@ Laboratorio para escalar pods en Kubernetes (EKS) basado en mensajes en una cola
 
 ---
 
-## Estructura del proyecto
+## Project structure
 
 ```
 keda-with-sqs/
-├── app.js                         # Consumidor SQS (Node.js)
-├── enviar.js                      # Productor de mensajes de prueba
-├── dockerfile                     # Imagen Docker del consumidor
+├── app.js                         # SQS consumer (Node.js)
+├── enviar.js                      # Test message producer
+├── dockerfile                     # Docker image for the consumer
 ├── package.json
 ├── .github/
 │   └── workflows/
-│       └── docker-publish.yml     # CI/CD: build y push a Docker Hub
+│       └── docker-image.yml       # CI/CD: multi-arch build and push to Docker Hub
 ├── app-k8s/
-│   ├── app-k8s.yaml               # Deployment en EKS
-│   └── scale.yaml                 # ScaledObject de KEDA
+│   ├── app-k8s.yaml               # EKS Deployment manifest
+│   └── scale.yaml                 # KEDA ScaledObject manifest
 ├── aws_resources/
-│   ├── setup_aws_resources.py     # Script Python idempotente para crear recursos AWS
-│   ├── sqs.json                   # Documento de política IAM
-│   └── sqs-stack.yaml             # Stack CloudFormation (referencia)
+│   ├── setup_aws_resources.py     # Idempotent Python script to reconcile AWS resources
+│   ├── sqs.json                   # IAM policy document
+│   └── sqs-stack.yaml             # CloudFormation stack (reference)
 └── send_message_sqs/
-    └── send_message.sh            # Script para enviar mensajes de prueba a SQS
+    └── send_message.sh            # Script to send test messages to SQS
 ```
 
 ---
 
-## Imagen Docker
+## Docker image
 
-La imagen está publicada en Docker Hub:
+The image is published on Docker Hub:
 
 **[yoniergomez/keda-with-sqs](https://hub.docker.com/r/yoniergomez/keda-with-sqs)**
 
@@ -54,7 +54,7 @@ La imagen está publicada en Docker Hub:
 docker pull yoniergomez/keda-with-sqs:latest
 ```
 
-### Ejecutar localmente
+### Run locally
 
 ```bash
 docker run -e QUEUE_URL="https://sqs.us-east-1.amazonaws.com/<ACCOUNT_ID>/<QUEUE_NAME>" \
@@ -63,75 +63,57 @@ docker run -e QUEUE_URL="https://sqs.us-east-1.amazonaws.com/<ACCOUNT_ID>/<QUEUE
 
 ---
 
-## CI/CD — GitHub Actions
+## AWS Resources
 
-El workflow `.github/workflows/docker-publish.yml` hace build y push automático a Docker Hub cada vez que se hace push a `main` con cambios en `app.js`, `package.json` o `dockerfile`.
+### Python script (recommended)
 
-### Secrets requeridos en GitHub
+`aws_resources/setup_aws_resources.py` is a **reconciliation script**: it creates each resource if it does not exist, and updates it to match the desired configuration if it already exists. Running it multiple times is safe — the end state is always the same.
 
-| Secret     | Descripción                    |
-|------------|--------------------------------|
-| `USER_HUB` | Usuario de Docker Hub          |
-| `PASS_HUB` | Token/contraseña de Docker Hub |
+#### Managed resources
 
-### Tags generados automáticamente
-
-- `yoniergomez/keda-with-sqs:latest` — en cada push a `main`
-- `yoniergomez/keda-with-sqs:<sha-corto>` — por commit
-
----
-
-## Recursos AWS
-
-### Opción A — Script Python (recomendado)
-
-El script `aws_resources/setup_aws_resources.py` es **idempotente**: si un recurso ya existe lo omite sin error.
-
-#### Recursos que gestiona
-
-| Recurso               | Nombre por defecto         |
+| Resource              | Default name               |
 |-----------------------|----------------------------|
-| SQS Cola              | `keda-with-sqs`            |
+| SQS Queue             | `keda-with-sqs`            |
 | SQS Dead Letter Queue | `keda-with-sqs-dlq`        |
-| Política IAM          | `keda-with-sqs-policy`     |
-| Rol IAM (IRSA)        | `keda-with-sqs-role`       |
-| Service Account K8s   | `keda-sqs-sa`              |
+| IAM Policy            | `keda-with-sqs-policy`     |
+| IAM Role (IRSA)       | `keda-with-sqs-role`       |
+| Kubernetes SA         | `keda-sqs-sa`              |
 
-#### Instalación de dependencias
+#### Install dependencies
 
 ```bash
 pip install boto3
 ```
 
-#### Ejecución
+#### Usage
 
 ```bash
-# Modo dry-run (muestra pasos sin hacer cambios)
+# Dry-run (shows steps without making real changes)
 python3 aws_resources/setup_aws_resources.py --dry-run
 
-# Ejecución real (requiere credenciales AWS configuradas)
-export CLUSTER_NAME="mi-eks-cluster"
+# Real execution (requires AWS credentials configured)
+export CLUSTER_NAME="my-eks-cluster"
 export K8S_NAMESPACE="default"
 python3 aws_resources/setup_aws_resources.py
 ```
 
-#### Variables de entorno disponibles
+#### Environment variables
 
-| Variable               | Default                    | Descripción                        |
+| Variable               | Default                    | Description                        |
 |------------------------|----------------------------|------------------------------------|
-| `AWS_REGION`           | `us-east-1`                | Región de AWS                      |
-| `QUEUE_NAME`           | `keda-with-sqs`            | Nombre de la cola SQS              |
-| `DLQ_NAME`             | `keda-with-sqs-dlq`        | Nombre de la cola DLQ              |
-| `POLICY_NAME`          | `keda-with-sqs-policy`     | Nombre de la política IAM          |
-| `ROLE_NAME`            | `keda-with-sqs-role`       | Nombre del rol IAM                 |
-| `CLUSTER_NAME`         | *(vacío — omite paso)*     | Nombre del cluster EKS             |
-| `K8S_NAMESPACE`        | `default`                  | Namespace en Kubernetes            |
-| `SERVICE_ACCOUNT_NAME` | `keda-sqs-sa`              | Nombre del Service Account         |
-| `PERMISSIONS_BOUNDARY` | `Lz-Governance-Boundary`   | Nombre del permissions boundary    |
+| `AWS_REGION`           | `us-east-1`                | AWS region                         |
+| `QUEUE_NAME`           | `keda-with-sqs`            | SQS queue name                     |
+| `DLQ_NAME`             | `keda-with-sqs-dlq`        | Dead Letter Queue name             |
+| `POLICY_NAME`          | `keda-with-sqs-policy`     | IAM policy name                    |
+| `ROLE_NAME`            | `keda-with-sqs-role`       | IAM role name                      |
+| `CLUSTER_NAME`         | *(empty — step skipped)*   | EKS cluster name                   |
+| `K8S_NAMESPACE`        | `default`                  | Kubernetes namespace               |
+| `SERVICE_ACCOUNT_NAME` | `keda-sqs-sa`              | Kubernetes Service Account name    |
+| `PERMISSIONS_BOUNDARY` | `Lz-Governance-Boundary`   | Permissions boundary policy name   |
 
 ---
 
-### Opción B — CloudFormation (referencia)
+### CloudFormation (reference)
 
 ```bash
 aws cloudformation deploy \
@@ -142,14 +124,14 @@ aws cloudformation deploy \
 
 ---
 
-## Despliegue en EKS
+## Deploy on EKS
 
-### 1. Prerequisitos
+### 1. Prerequisites
 
-- Cluster EKS con KEDA instalado
-- IRSA configurado (service account con rol IAM)
+- EKS cluster with KEDA installed
+- IRSA configured (service account with IAM role)
 
-### 2. Instalar KEDA
+### 2. Install KEDA
 
 ```bash
 helm repo add kedacore https://kedacore.github.io/charts
@@ -157,16 +139,16 @@ helm repo update
 helm install keda kedacore/keda --namespace keda --create-namespace
 ```
 
-### 3. Aplicar manifiestos
+### 3. Apply manifests
 
-> Actualiza la imagen en `app-k8s/app-k8s.yaml` con `yoniergomez/keda-with-sqs:latest` antes de aplicar.
+> Update the image in `app-k8s/app-k8s.yaml` to `yoniergomez/keda-with-sqs:latest` before applying.
 
 ```bash
 kubectl apply -f app-k8s/app-k8s.yaml
 kubectl apply -f app-k8s/scale.yaml
 ```
 
-### 4. Enviar mensajes de prueba
+### 4. Send test messages
 
 ```bash
 bash send_message_sqs/send_message.sh
@@ -174,16 +156,16 @@ bash send_message_sqs/send_message.sh
 
 ---
 
-## ¿Qué es KEDA?
+## What is KEDA?
 
-KEDA es un componente ligero que se añade a cualquier clúster Kubernetes y extiende el HPA (Horizontal Pod Autoscaler) para escalar en base a eventos externos (colas SQS, Kafka, Azure Service Bus, etc.). Solo se activa en los deployments donde se declara un `ScaledObject`.
+KEDA is a lightweight component that adds event-driven scaling to any Kubernetes cluster, extending the HPA (Horizontal Pod Autoscaler) for external event sources like SQS, Kafka, or Azure Service Bus. It only activates on deployments where a `ScaledObject` is declared.
 
-**Comportamiento de este laboratorio:**
+**Lab configuration:**
 
-| Parámetro          | Valor | Descripción                                      |
+| Parameter          | Value | Description                                      |
 |--------------------|-------|--------------------------------------------------|
-| `minReplicaCount`  | `0`   | Los pods se apagan cuando no hay mensajes        |
-| `maxReplicaCount`  | `10`  | Escala hasta 10 pods bajo carga                  |
-| `queueLength`      | `5`   | Un pod por cada 5 mensajes en la cola            |
-| `pollingInterval`  | `30s` | Frecuencia de revisión de la cola                |
-| `cooldownPeriod`   | `10s` | Espera antes de desescalar                       |
+| `minReplicaCount`  | `0`   | Pods scale to zero when the queue is empty       |
+| `maxReplicaCount`  | `10`  | Scale up to 10 pods under load                   |
+| `queueLength`      | `5`   | One pod per 5 messages in the queue              |
+| `pollingInterval`  | `30s` | How often KEDA checks the queue                  |
+| `cooldownPeriod`   | `10s` | Wait time before scaling down                    |
