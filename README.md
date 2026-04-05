@@ -1,5 +1,19 @@
 # KEDA with SQS — Pod Autoscaling on EKS
 
+[![GitHub Stars](https://img.shields.io/github/stars/YonierGomez/keda-with-sqs?style=flat-square&logo=github&color=yellow)](https://github.com/YonierGomez/keda-with-sqs/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/YonierGomez/keda-with-sqs?style=flat-square&logo=github)](https://github.com/YonierGomez/keda-with-sqs/network/members)
+[![Docker Pulls](https://img.shields.io/docker/pulls/yoniergomez/keda-with-sqs?style=flat-square&logo=docker&color=blue)](https://hub.docker.com/r/yoniergomez/keda-with-sqs)
+[![Docker Image Size](https://img.shields.io/docker/image-size/yoniergomez/keda-with-sqs/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/yoniergomez/keda-with-sqs)
+[![CI](https://img.shields.io/github/actions/workflow/status/YonierGomez/keda-with-sqs/docker-image.yml?branch=main&style=flat-square&logo=githubactions&label=CI)](https://github.com/YonierGomez/keda-with-sqs/actions/workflows/docker-image.yml)
+[![License](https://img.shields.io/github/license/YonierGomez/keda-with-sqs?style=flat-square)](LICENSE)
+
+![Node.js](https://img.shields.io/badge/Node.js-alpine-339933?style=flat-square&logo=node.js&logoColor=white)
+![AWS SQS](https://img.shields.io/badge/AWS-SQS-FF9900?style=flat-square&logo=amazonsqs&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-EKS-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
+![KEDA](https://img.shields.io/badge/KEDA-autoscaling-00bcd4?style=flat-square&logo=keda&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-multi--arch-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Python](https://img.shields.io/badge/Python-boto3-3776AB?style=flat-square&logo=python&logoColor=white)
+
 Lab for scaling pods in Kubernetes (EKS) based on messages in an **AWS SQS** queue using **KEDA** (Kubernetes Event-Driven Autoscaling).
 
 ---
