@@ -52,7 +52,7 @@ jobs:
           file: Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          outputs: type=image,name=neytor/sqs-consumer,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=yoniergomez/keda-with-sqs,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -95,9 +95,9 @@ jobs:
       - name: Create and push multi-arch manifest
         run: |
           docker buildx imagetools create \
-            -t neytor/sqs-consumer:latest \
-            -t neytor/sqs-consumer:v1 \
-            $(printf 'neytor/sqs-consumer@sha256:%s ' $(ls /tmp/digests))
+            -t yoniergomez/keda-with-sqs:latest \
+            -t yoniergomez/keda-with-sqs:v1 \
+            $(printf 'yoniergomez/keda-with-sqs@sha256:%s ' $(ls /tmp/digests))
 
   # ── PR: build only (no push) for validation ──────────────────────────────────
   build-pr:

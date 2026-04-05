@@ -1,394 +1,189 @@
-# Escalar pods basado en eventos
+# KEDA with SQS — Autoscaling de Pods en EKS
 
-### Autoscaling de pods basado en eventos
+Laboratorio para escalar pods en Kubernetes (EKS) basado en mensajes en una cola **AWS SQS** usando **KEDA** (Kubernetes Event-Driven Autoscaling).
 
-Para implementar el autoscaling se habilita dentro de la  línea base de EKS la herramienta KEDA (Kubernetes Event Driven  Autoscaling) que me va a permitir escalar basado en eventos en EKS. Esta herramienta no compite con HPA (Horizontal pod autoscaler) sino que  amplia la capacidad para escalar de acuerdo a otro tipo de eventos y  solo aplica para los despliegues donde se habilita su uso.
+---
 
-### ¿Qué es Keda?
+## Arquitectura
 
-Es un componente ligero y de propósito único que puede  añadirse a cualquier clúster de Kubernetes. Funciona junto a los  componentes estándar de Kubernetes, como el HPA horizontal pod  autoscaler y puede ampliar la funcionalidad sin sobrescribirla ni  duplicarla. Con KEDA se pueden asignar explícitamente las aplicaciones  que se deseen utilizar este escalado de por eventos mientras que las  demás aplicaciones siguen funcionando.
-
-Esto hace que sea una opción flexible y segura para ejecutar  junto a cualquier número de otras aplicaciones o marcos de trabajo de  Kubernetes.
-
-## Arquitectura de laboratorio
-
-![SQS](/data/work-bco/keda-role/SQS-APP/SQS.png)
-
-## Cola sqs
-
-Creamos un stack de cloudformation para nuestro servicio de sqs
-
-```yaml
-Resources:
-  MyQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: yonier-sqs
-      DelaySeconds: 0
-      MaximumMessageSize: 262144
-      MessageRetentionPeriod: 345600
-      ReceiveMessageWaitTimeSeconds: 0
-      VisibilityTimeout: 30
-      RedrivePolicy:
-        deadLetterTargetArn: { "Fn::GetAtt" : ["DLQueue", "Arn"] }
-        maxReceiveCount: 5
-  DLQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: yonier-sqs-dlq
-      DelaySeconds: 0
-      MaximumMessageSize: 262144
-      MessageRetentionPeriod: 345600
-      ReceiveMessageWaitTimeSeconds: 0
-      VisibilityTimeout: 30
+```
+┌──────────────┐     mensajes     ┌─────────────┐     métricas     ┌──────────────┐
+│  Productor   │ ──────────────►  │  AWS SQS    │ ──────────────►  │    KEDA      │
+│  (enviar.js) │                  │  Queue      │                  │  ScaledObject│
+└──────────────┘                  └─────────────┘                  └──────┬───────┘
+                                                                          │ escala
+                                                                   ┌──────▼───────┐
+                                                                   │  Deployment  │
+                                                                   │  (app.js)    │
+                                                                   └──────────────┘
 ```
 
-## App en nodejs
+---
 
-He creado una app en node js que se encarga de leer los mensajes en una cola de sqs.
+## Estructura del proyecto
 
-### Pasos previos
+```
+keda-with-sqs/
+├── app.js                         # Consumidor SQS (Node.js)
+├── enviar.js                      # Productor de mensajes de prueba
+├── dockerfile                     # Imagen Docker del consumidor
+├── package.json
+├── .github/
+│   └── workflows/
+│       └── docker-publish.yml     # CI/CD: build y push a Docker Hub
+├── app-k8s/
+│   ├── app-k8s.yaml               # Deployment en EKS
+│   └── scale.yaml                 # ScaledObject de KEDA
+├── aws_resources/
+│   ├── setup_aws_resources.py     # Script Python idempotente para crear recursos AWS
+│   ├── sqs.json                   # Documento de política IAM
+│   └── sqs-stack.yaml             # Stack CloudFormation (referencia)
+└── send_message_sqs/
+    └── send_message.sh            # Script para enviar mensajes de prueba a SQS
+```
 
-Creamos un proyecto de nodejs.
+---
+
+## Imagen Docker
+
+La imagen está publicada en Docker Hub:
+
+**[yoniergomez/keda-with-sqs](https://hub.docker.com/r/yoniergomez/keda-with-sqs)**
 
 ```bash
-npm init -y
-
-#Instalamos el sdk para sqs
-npm install aws-sdk 
+docker pull yoniergomez/keda-with-sqs:latest
 ```
 
-Esto nos generará nuestro package.json
-
-### App
-
-```javascript
-const AWS = require('aws-sdk');
-
-// Configuración de AWS con la región apropiada
-AWS.config.update({ region: 'us-east-1' });
-
-// Crear una instancia de SQS
-const sqs = new AWS.SQS({ apiVersion: '2012-11-05' });
-
-// URL de la cola de SQS desde la variable de entorno
-const queueUrl = process.env.QUEUE_URL;
-console.log('Prueba');
-console.log(queueUrl);
-
-// Configuración de parámetros para recibir mensajes de la cola
-const params = {
-  AttributeNames: [
-    'All'
-  ],
-  MaxNumberOfMessages: 10,
-  MessageAttributeNames: [
-    'All'
-  ],
-  QueueUrl: queueUrl,
-  VisibilityTimeout: 20,
-  WaitTimeSeconds: 0
-};
-
-// Función para recibir mensajes de la cola de SQS
-const receiveSQSMessages = () => {
-  sqs.receiveMessage(params, (err, data) => {
-    if (err) {
-      console.log('Error al recibir mensajes de la cola de SQS:', err);
-    } else if (data.Messages) {
-      console.log('Mensajes recibidos de la cola de SQS:');
-      data.Messages.forEach(message => {
-        console.log('Cuerpo del mensaje:', message.Body);
-        console.log('Id del mensaje:', message.MessageId);
-        console.log('Recibo del mensaje:', message.ReceiptHandle);
-        console.log('---');
-      });
-    } else {
-      console.log('No hay mensajes disponibles en la cola de SQS.');
-    }
-  });
-};
-
-// Ejecutar la función cada 5 segundos (puedes ajustar este valor según tus necesidades)
-setInterval(receiveSQSMessages, 5000);
-
-```
-
-## Contenerizar app
-
-Creamos un Dockerfile para generar una imagen de docker
-
-```dockerfile
-# Usar una imagen base de Node.js
-FROM node:21-alpine
-
-#Pasar url de cola
-ENV QUEUE_URL "https://sqs.us-east-1.amazonaws.com/715211652634/skillfullers"
-
-# Establecer el directorio de trabajo dentro del contenedor
-WORKDIR /app
-
-# Copiar el archivo de tu aplicación y el archivo package.json a la imagen
-COPY package.json ./
-COPY app.js .
-
-# Instalar las dependencias
-RUN npm install
-
-# Comando para iniciar tu aplicación
-CMD [ "node", "app.js" ]
-```
-
-Con esto ya podemos hacer el build de nuestra app y subirla a un ECR
-
-## Rol para deployment sqs
-
-Debemos crear un rol que asumirá el pod, para esto tenemos la siguiente politica y el comando de eksctl para crear nuestro sa
-
-### Archivo sqs_policy.json
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-      {
-          "Effect": "Allow",
-          "Action": [
-              "sqs:GetQueueUrl",
-              "sqs:ReceiveMessage",
-              "sqs:DeleteMessage"
-          ],
-          "Resource": "arn:aws:sqs:us-east-1:121212:yonier-sqs"
-      }
-  ]
-}
-
-```
-
-### Script para crear politica y rol
+### Ejecutar localmente
 
 ```bash
-#!/bin/bash
-
-#VARIABLES
-export AWS_REGION="us-east-1"
-POLICY_NAME="sqs-yonier"
-POLICY_ARN=$(aws iam list-policies --output text --query 'Policies[?PolicyName==`'$POLICY_NAME'`].Arn')
-ROLE_NAME="eksctl-yonier-role"
-ID=$(aws sts get-caller-identity --query "Account" --output text)
-CLUSTER_NAME=eks-contenerizacionlab-dev
-
-
-echo ===============================================
-echo Create iam policy sqs-skillfullers
-echo ===============================================
-# aws iam delete-policy --policy-arn arn:aws:iam::327313795930:policy/sqs-skillfullers
-if [ -z "$POLICY_ARN" ]; then
-    aws iam create-policy \
-    --policy-name $POLICY_NAME \
-    --policy-document file://sqs_policy.json \
-    --description="Rol for sqs eks" \
-    --no-paginate > /dev/null 2>&1
-else
-    echo "La política sqs-yonier ya existe en IAM."
-fi
-
-
-echo ===============================================
-echo Create iam role eksctl-skillfullers-role
-echo ===============================================
-eksctl create iamserviceaccount \
-  --cluster=$CLUSTER_NAME \
-  --namespace=yonier-nsa \
-  --name=yonier-sa  \
-  --role-name $ROLE_NAME \
-  --attach-policy-arn=arn:aws:iam::$ID:policy/$POLICY_NAME \
-  --override-existing-serviceaccounts \
-  --approve
-
-echo ===============================================
-echo Add Permissions Boundary to $ROLE_NAME
-echo ===============================================
-# Verificar si el rol ya existe
-EXISTING_ROLE=$(aws iam get-role --role-name $ROLE_NAME --output text --query 'Role.RoleName')
-
-# Si el rol ya existe, agregar el límite de permisos
-if [ -n "$EXISTING_ROLE" ]; then
-    echo "El rol $ROLE_NAME ya existe. Agregando boundary BoundaryName..."
-    aws iam put-role-permissions-boundary --role-name $ROLE_NAME \
-        --permissions-boundary=arn:aws:iam::$ID:policy/My_boundary #ESTE PARAMETRO ES OPCIONAL SI TIENE BOUNDARY EN SU INFRA
-else
-    echo "El rol $ROLE_NAME no existe."
-fi
+docker run -e QUEUE_URL="https://sqs.us-east-1.amazonaws.com/<ACCOUNT_ID>/<QUEUE_NAME>" \
+  yoniergomez/keda-with-sqs:latest
 ```
 
-## Desplegar app
+---
 
-Creamos un deployment
+## CI/CD — GitHub Actions
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app: yonier-app-sqs
-  name: yonier-sqs-dp
-  namespace: yonier
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: yonier-app-sqs
-  template:
-    metadata:
-      labels:
-        app: yonier-app-sqs
-    spec:
-      serviceAccount: yonier-sa  # Asignación del Service Account aquí
-      containers:
-      - image: public.ecr.aws/repo-yonier/eks:app-sqs-yonier
-        imagePullPolicy: Always
-        name: yonier-sqs
-        resources:
-          limits:
-            cpu: 100m
-            memory: 200Mi
-          requests:
-            cpu: 30m
-            memory: 90Mi
-```
+El workflow `.github/workflows/docker-publish.yml` hace build y push automático a Docker Hub cada vez que se hace push a `main` con cambios en `app.js`, `package.json` o `dockerfile`.
 
-## Crear ScaleObject
+### Secrets requeridos en GitHub
 
-Cuando creas un recurso tipo ScaleObject se va a generar un hpa automáticamente que se encargará de escalar las replicas.
+| Secret     | Descripción                    |
+|------------|--------------------------------|
+| `USER_HUB` | Usuario de Docker Hub          |
+| `PASS_HUB` | Token/contraseña de Docker Hub |
 
-```yaml
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  labels:
-    app.bancolombia.com.co/application-code: sq
-    app.bancolombia.com.co/cost-center: cost
-    app.bancolombia.com.co/env: pdn
-    app.bancolombia.com.co/project: "cpe-contenerizacion"
-  name: skillfullers-sqs-hpa #Nombre del recurso ScaledObject
-  namespace: skillfullers #Ns donde se va a desplegar el recurso
-spec:
-  maxReplicaCount: 10 #Cantidad máx a escalar pods
-  minReplicaCount: 0 #Cantidad min de pods existentes
-  pollingInterval: 30 #Frecuencia para revisar los msj en las colas para determinar si debe escalar o desescalar
-  cooldownPeriod: 10  # Este es el tiempo en segundos que KEDA esperará antes de desescalar los pods.
+### Tags generados automáticamente
 
-  scaleTargetRef:
-    name: skillfullers-sqs-dp #Aqui va el nombre de su deployment
-  triggers:
-  - metadata:
-      awsRegion: us-east-1 #Region de aws
-    # activationQueueLength: "30"
-      identityOwner: operator #Autenticacion
-      queueLength: "5" #Cantidad de mensajes que un pod va a soportar
-      queueURL: yonierSqs #Nombre de su cola
-    type: aws-sqs-queue
-```
+- `yoniergomez/keda-with-sqs:latest` — en cada push a `main`
+- `yoniergomez/keda-with-sqs:<sha-corto>` — por commit
 
-## Crear rol para keda
+---
 
-Creamos una politica y un rol para keda, usaremos el sa keda-operator
+## Recursos AWS
 
-### Policy keda_policy
+### Opción A — Script Python (recomendado)
 
-```yaml
-{
-    "Version": "2012-10-17",
-    "Statement": [
-       {
-         "Sid": "SQSGetActions",
-         "Effect": "Allow",
-         "Action": "sqs:GetQueueAttributes",
-         "Resource": "*"
-       }
-    ]
-}
-```
+El script `aws_resources/setup_aws_resources.py` es **idempotente**: si un recurso ya existe lo omite sin error.
 
-## Rol keda
+#### Recursos que gestiona
+
+| Recurso               | Nombre por defecto         |
+|-----------------------|----------------------------|
+| SQS Cola              | `keda-with-sqs`            |
+| SQS Dead Letter Queue | `keda-with-sqs-dlq`        |
+| Política IAM          | `keda-with-sqs-policy`     |
+| Rol IAM (IRSA)        | `keda-with-sqs-role`       |
+| Service Account K8s   | `keda-sqs-sa`              |
+
+#### Instalación de dependencias
 
 ```bash
-#!/bin/bash
-
-#VARIABLES
-export AWS_REGION="us-east-1"
-POLICY_NAME="KedaEksPolicy"
-POLICY_ARN=$(aws iam list-policies --output text --query 'Policies[?PolicyName==`'$POLICY_NAME'`].Arn')
-ROLE_NAME="KedaEksRole"
-ID=$(aws sts get-caller-identity --query "Account" --output text)
-CLUSTER_NAME=eks-informacion-qa
-
-
-echo ===============================================
-echo Create iam policy KedaEksPolicy
-echo ===============================================
-# aws iam delete-policy --policy-arn arn:aws:iam::327313795930:policy/KedaEksPolicy
-if [ -z "$POLICY_ARN" ]; then
-    aws iam create-policy \
-    --policy-name $POLICY_NAME \
-    --policy-document file://keda_policy.json \
-    --description="Rol for keda eks" \
-    --no-paginate > /dev/null 2>&1
-else
-    echo "La política KedaEksPolicy ya existe en IAM."
-fi
-
-
-echo ===============================================
-echo Create iam role KedaEksRole
-echo ===============================================
-eksctl create iamserviceaccount \
-  --cluster=$CLUSTER_NAME \
-  --namespace=keda \
-  --name=keda-operator  \
-  --role-name $ROLE_NAME \
-  --attach-policy-arn=arn:aws:iam::$ID:policy/$POLICY_NAME \
-  --override-existing-serviceaccounts \
-  --approve
-
-echo ===============================================
-echo Add Permissions Boundary to $ROLE_NAME
-echo ===============================================
-# Verificar si el rol ya existe
-EXISTING_ROLE=$(aws iam get-role --role-name $ROLE_NAME --output text --query 'Role.RoleName')
-
-# Si el rol ya existe, agregar el límite de permisos
-if [ -n "$EXISTING_ROLE" ]; then
-    echo "El rol $ROLE_NAME ya existe. Agregando permissions-boundary Lz-Governance-Boundary..."
-    aws iam put-role-permissions-boundary --role-name $ROLE_NAME \
-        --permissions-boundary=arn:aws:iam::$ID:policy/Lz-Governance-Boundary
-else
-    echo "El rol $ROLE_NAME no existe."
-fi
+pip install boto3
 ```
 
-## Envíar mensajes a la cola de sqs
-
-Para simular el envío de mensajes a la cola lo haré a través de aws cli.
+#### Ejecución
 
 ```bash
-aws sqs send-message --queue-url "https://sqs.us-east-1.amazonaws.com/121212/yonierSqs" --message-body "lab $RANDOM" --no-cli-pager
+# Modo dry-run (muestra pasos sin hacer cambios)
+python3 aws_resources/setup_aws_resources.py --dry-run
+
+# Ejecución real (requiere credenciales AWS configuradas)
+export CLUSTER_NAME="mi-eks-cluster"
+export K8S_NAMESPACE="default"
+python3 aws_resources/setup_aws_resources.py
 ```
 
-Crearé un ciclo para envíar 400 msj 
+#### Variables de entorno disponibles
+
+| Variable               | Default                    | Descripción                        |
+|------------------------|----------------------------|------------------------------------|
+| `AWS_REGION`           | `us-east-1`                | Región de AWS                      |
+| `QUEUE_NAME`           | `keda-with-sqs`            | Nombre de la cola SQS              |
+| `DLQ_NAME`             | `keda-with-sqs-dlq`        | Nombre de la cola DLQ              |
+| `POLICY_NAME`          | `keda-with-sqs-policy`     | Nombre de la política IAM          |
+| `ROLE_NAME`            | `keda-with-sqs-role`       | Nombre del rol IAM                 |
+| `CLUSTER_NAME`         | *(vacío — omite paso)*     | Nombre del cluster EKS             |
+| `K8S_NAMESPACE`        | `default`                  | Namespace en Kubernetes            |
+| `SERVICE_ACCOUNT_NAME` | `keda-sqs-sa`              | Nombre del Service Account         |
+| `PERMISSIONS_BOUNDARY` | `Lz-Governance-Boundary`   | Nombre del permissions boundary    |
+
+---
+
+### Opción B — CloudFormation (referencia)
 
 ```bash
-#!/bin/bash
-queue_url="https://sqs.us-east-1.amazonaws.com/121212/yonierSqs"
-
-for i in {1..400}
-do
-    result=$(aws sqs send-message --queue-url $queue_url --message-body "lab $RANDOM $i" --no-cli-pager)
-    echo "Resultado para el mensaje $i:"
-    echo $result
-    echo "-------------"
-done
-
+aws cloudformation deploy \
+  --template-file aws_resources/sqs-stack.yaml \
+  --stack-name keda-with-sqs \
+  --capabilities CAPABILITY_IAM
 ```
 
+---
+
+## Despliegue en EKS
+
+### 1. Prerequisitos
+
+- Cluster EKS con KEDA instalado
+- IRSA configurado (service account con rol IAM)
+
+### 2. Instalar KEDA
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install keda kedacore/keda --namespace keda --create-namespace
+```
+
+### 3. Aplicar manifiestos
+
+> Actualiza la imagen en `app-k8s/app-k8s.yaml` con `yoniergomez/keda-with-sqs:latest` antes de aplicar.
+
+```bash
+kubectl apply -f app-k8s/app-k8s.yaml
+kubectl apply -f app-k8s/scale.yaml
+```
+
+### 4. Enviar mensajes de prueba
+
+```bash
+bash send_message_sqs/send_message.sh
+```
+
+---
+
+## ¿Qué es KEDA?
+
+KEDA es un componente ligero que se añade a cualquier clúster Kubernetes y extiende el HPA (Horizontal Pod Autoscaler) para escalar en base a eventos externos (colas SQS, Kafka, Azure Service Bus, etc.). Solo se activa en los deployments donde se declara un `ScaledObject`.
+
+**Comportamiento de este laboratorio:**
+
+| Parámetro          | Valor | Descripción                                      |
+|--------------------|-------|--------------------------------------------------|
+| `minReplicaCount`  | `0`   | Los pods se apagan cuando no hay mensajes        |
+| `maxReplicaCount`  | `10`  | Escala hasta 10 pods bajo carga                  |
+| `queueLength`      | `5`   | Un pod por cada 5 mensajes en la cola            |
+| `pollingInterval`  | `30s` | Frecuencia de revisión de la cola                |
+| `cooldownPeriod`   | `10s` | Espera antes de desescalar                       |
