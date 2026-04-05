@@ -1,98 +1,88 @@
-SQS Consumer App escrita en nodejs con la finalidad de leer los mensajes de una cola de sqs y mostrarlos en pantalla.
-======================  
-## Referencia rápida
-* [¿Qué es web sqs?](#qué-es-web-sqs)
-* [¿Cuál es nuestro uso?](#cuál-es-nuestro-uso)
-* [¿Cómo usar esta imagen?](#cómo-usar-esta-imagen)
-* [Arquitectura soportada](#arquitectura-soportada)
-* [Variables](#variables)
-* [Uso en raspberry](#uso-en-raspberry)
-* [Te invito a visitar mi web](#te-invito-a-visitar-mi-web)
+SQS Consumer App built with Node.js to read messages from an SQS queue and display them.
+======================
+
+## Quick reference
+* [What is Amazon SQS?](#what-is-amazon-sqs)
+* [What does this image do?](#what-does-this-image-do)
+* [How to use this image](#how-to-use-this-image)
+* [Supported architectures](#supported-architectures)
+* [Environment variables](#environment-variables)
+* [Running on Raspberry Pi](#running-on-raspberry-pi)
+* [Visit my website](#visit-my-website)
 
 
-## ¿Qué es web sqs?
+## What is Amazon SQS?
 
-Amazon Simple Queue Service (Amazon SQS) es un servicio de mensajería completamente administrado que facilita el intercambio de mensajes entre aplicaciones y componentes de software en la nube. Amazon SQS permite la desacoplar y escalar microservicios, sistemas distribuidos y aplicaciones sin servidores.
+Amazon Simple Queue Service (Amazon SQS) is a fully managed message queuing service that enables you to decouple and scale microservices, distributed systems, and serverless applications.
 
-Los mensajes enviados a través de Amazon SQS se almacenan en una cola hasta que se procesan o se eliminan. Este servicio puede transmitir cualquier volumen de datos, sin perder mensajes ni necesitar otros servicios adicionales. Puede integrarse con otros servicios de AWS para crear soluciones escalables y fiables.
+Messages sent through Amazon SQS are stored in a queue until they are processed or deleted. The service can transmit any volume of data without losing messages or requiring additional services. It integrates with other AWS services to build scalable and reliable solutions.
 
-Amazon SQS ofrece dos tipos de colas: colas estándar y colas FIFO (First-In-First-Out). Las colas estándar ofrecen una entrega de mensajes al menos una vez, mientras que las colas FIFO ofrecen una entrega exactamente una vez. Cada tipo de cola tiene sus propias características y casos de uso recomendados.
-
-
+Amazon SQS offers two types of queues: standard queues and FIFO (First-In-First-Out) queues. Standard queues offer at-least-once delivery, while FIFO queues offer exactly-once delivery.
 
 ![sqs](https://d1.awsstatic.com/legal/AmazonMessaging_SQS_SNS/product-page-diagram_Amazon-SQS%402x.6df419be87198e0f8b0c8151eceac65584db78ea.png)
 
-## ¿Cuál es nuestro uso?
+## What does this image do?
 
-Esta app fue construida en nodejs y tiene como finalidad leer los mensajes de una cola de sqs, su rol es de consumidor. 
-  
+This app is built with Node.js and acts as an **SQS consumer**: it polls a queue, reads incoming messages, and prints them to stdout.
 
-## ¿Cómo usar esta imagen?
 
-Puede hacer uso de docker cli o docker compose
+## How to use this image
 
-### Requisitos indispensables
+You can use either the Docker CLI or Docker Compose.
 
-Debe pasar la variable `-e QUEUE_URL=URL-COLA-SQS"`
-  
-### docker-compose (recomendado)
+### Required
+
+You must pass the `-e QUEUE_URL=<YOUR_SQS_QUEUE_URL>` environment variable.
+
+### docker-compose (recommended)
 
 ```yaml
 ---
 version: '3'
 services:
   sqs_consumer:
-    image: neytor/sqs-consumer
-    container_name: sqs_consumer_container
+    image: yoniergomez/keda-with-sqs
+    container_name: sqs_consumer
     restart: always
     environment:
-      - QUEUE_URL=URL-COLA-SQS #OBLIGATORIO
-
-...
+      - QUEUE_URL=<YOUR_SQS_QUEUE_URL>  # REQUIRED
 ```
 
-> Nota: Puedes reemplazar environment por env_file y pasarle un archivo .env como valor, recuerde que el archivo .env debe tener las variables deseadas.
+> Tip: You can replace `environment` with `env_file` and point it to a `.env` file containing the variables.
 
 ### docker cli
 
 ```bash
-docker container run \
-   --name sqs_consumer -e QUEUE_URL=URL-COLA-SQS
-   -d neytor/sqs-consumer
+docker run --name sqs_consumer \
+  -e QUEUE_URL=<YOUR_SQS_QUEUE_URL> \
+  -d yoniergomez/keda-with-sqs
 ```
 
-## Arquitectura soportada
-La arquitectura soportada es la siguiente:
+## Supported architectures
 
-| Arquitectura | Disponible | Tag descarga |
-| ------------ | ---------- | ---------------------------- |
-| x86-64 | ✅ | docker pull neytor/sqs-consumer |
-| arm64 | ✅ | docker pull neytor/sqs-consumer:arm |
+| Architecture | Available | Pull command |
+|--------------|-----------|----------------------------------------------|
+| x86-64       | ✅        | `docker pull yoniergomez/keda-with-sqs`       |
+| arm64        | ✅        | `docker pull yoniergomez/keda-with-sqs`       |
 
-## Variables
-Puedes pasar las siguientes variables al crear el contenedor
+Both architectures are bundled in the same multi-arch manifest — no separate tags needed.
 
-| Variable | Función |
-| ------------- | ------------------------------------------------------------ |
-| `-e QUEUE_URL` |**Obligatorio:** Es la url de la cola de sqs |
+## Environment variables
 
+| Variable      | Required | Description                          |
+|---------------|----------|--------------------------------------|
+| `QUEUE_URL`   | **yes**  | Full URL of the SQS queue to consume |
 
-## Environment variables desde archivo (Docker secrets)
+## Running on Raspberry Pi
 
-Se recomienda pasar la variable `TOKEN`a través de un archivo.
-
-## Uso en Raspberry
-
-Puedes utilizarla para cualquier raspberry pi
+The image supports `linux/arm64` natively, so it works on any Raspberry Pi running a 64-bit OS:
 
 ```bash
-docker container run \
-  --name sqs_consumer -e QUEUE_URL=URL-COLA-SQS
-  -d neytor/sqs-consumer:arm
+docker run --name sqs_consumer \
+  -e QUEUE_URL=<YOUR_SQS_QUEUE_URL> \
+  -d yoniergomez/keda-with-sqs
 ```
 
-[![Try in PWD](https://github.com/play-with-docker/stacks/raw/cff22438cb4195ace27f9b15784bbb497047afa7/assets/images/button.png)](http://play-with-docker.com?stack=https://raw.githubusercontent.com/docker-library/docs/db214ae34137ab29c7574f5fbe01bc4eaea6da7e/wordpress/stack.yml)
+## Visit my website
 
-## Te invito a visitar mi web
-
-Puedes ver nuevos eventos en [https://www.yonier.com/](https://www.yonier.com)
+Check out new content and projects at [https://yonier.com](https://yonier.com)
